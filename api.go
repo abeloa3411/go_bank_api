@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	"github.com/gorilla/mux"
 )
@@ -13,7 +14,7 @@ import (
 type apiFunc func(http.ResponseWriter, *http.Request) error
 
 type ApiError struct{
-	Error string
+	Error string 	`json:"error"`
 }
 
 
@@ -68,10 +69,26 @@ func (s *APIServer) handleGetAccount(w http.ResponseWriter, r *http.Request) err
 
 //get all account by id
 func (s *APIServer) handleGetAccountByID(w http.ResponseWriter, r *http.Request) error{
+	if r.Method == "GET" {
+		id, err:= GetID(r)
+	if err != nil {
+		return err
+	}
 
-	account := NewAccount("Abel", "Wanyonyi")
+	account, err := s.store.GetAccountByID(id)
+
+	if err != nil{
+		return err
+	}
 
 	return writeJSON(w, http.StatusOK, account)
+	}
+
+	if r.Method == "DELETE"{
+		return s.handleDeleteAccount(w,r)
+	} 
+
+	return fmt.Errorf("invalid method %s", r.Method)
 }
 
 //create account
@@ -92,12 +109,26 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 
 //delete account
 func (s *APIServer) handleDeleteAccount(w http.ResponseWriter, r *http.Request) error{
-	return nil
+	id, err:= GetID(r)
+	if err != nil {
+		return err
+	}
+
+	if err := s.store.DeleteAccount(id) ; err != nil {
+		return err
+	}
+
+	return writeJSON(w , http.StatusOK, map[string]int{"deleted": id})
 }
 
 //transer funds
-func (s *APIServer) handleTranser(w http.ResponseWriter, r *http.Request) error{
-	return nil
+func (s *APIServer) handleTransfer(w http.ResponseWriter, r *http.Request) error{
+	transferReq := new(TranferRequest)
+
+	if err := json.NewDecoder(r.Body).Decode(transferReq) ; err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, transferReq)
 }
 
 //write json function
@@ -113,8 +144,24 @@ func (s *APIServer) Run(){
 
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
 	router.HandleFunc("/account/{id}", makeHTTPHandleFunc(s.handleGetAccountByID))
+	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
 
 	log.Println("Server is running on port", s.listenAdrr)
 
 	http.ListenAndServe(s.listenAdrr, router)
+}
+
+//getId function
+
+func GetID (r *http.Request) (int, error){
+
+	idStr := mux.Vars(r)["id"]
+
+	id, err := strconv.Atoi(idStr)
+
+	if err != nil{
+		return id, fmt.Errorf("invalid id %d given", id)
+	}
+
+	return id, nil
 }
