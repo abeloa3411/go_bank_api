@@ -7,11 +7,79 @@ import (
 	"net/http"
 	"strconv"
 
+	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/mux"
 )
 
 
 type apiFunc func(http.ResponseWriter, *http.Request) error
+
+func permissionDenied(w http.ResponseWriter){
+	writeJSON(w, http.StatusForbidden, ApiError{Error: "Permission denied"})
+	
+}
+
+
+//jsonwebtoken shanenigans
+func withJWTAuth(handlerFunc http.HandlerFunc, s Storage) http.HandlerFunc{
+	return func (w http.ResponseWriter, r *http.Request){
+
+		tokenString := r.Header.Get("x-jwt-token")
+		token, err := ValidateJWT(tokenString)
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+		if !token.Valid {
+			permissionDenied(w)
+			return
+		}
+		userID, err := GetID(r)
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+		account, err := s.GetAccountByID(userID)
+		if err != nil {
+			permissionDenied(w)
+			return
+		}
+
+		claims := token.Claims.(jwt.MapClaims)
+		if account.Number != int64(claims["accountNumber"].(float64)) {
+			permissionDenied(w)
+			return
+		}
+
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, ApiError{Error: "invalid token"})
+			return
+		}
+
+		handlerFunc(w, r)
+	}
+}
+
+func ValidateJWT(tokenString string)(*jwt.Token, error){
+	return jwt.Parse(tokenString, func(t *jwt.Token) (interface{}, error) {
+		if _,ok := t.Method.(*jwt.SigningMethodHMAC); ! ok{
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+
+		return []byte("jsonSecret"), nil
+	})
+}
+
+func createJWT(account *Account) (string, error){
+	claims := &jwt.MapClaims{
+		"expiresAt": 15000,
+		"accountNumber": account.Number,
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	return token.SignedString([]byte("jsonSecret"))
+}
 
 type ApiError struct{
 	Error string 	`json:"error"`
@@ -91,6 +159,8 @@ func (s *APIServer) handleGetAccountByID(w http.ResponseWriter, r *http.Request)
 	return fmt.Errorf("invalid method %s", r.Method)
 }
 
+//eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2NvdW50TnVtYmVyIjozNTc5NSwiZXhwaXJlc0F0IjoxNTAwMH0.rFWAXnTum-oWAcUDO1N0cDo-W7UUrgezZ7GLBz3IrrQ
+
 //create account
 func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) error{
 	createAcc := new(CreateAccountRequest)
@@ -104,6 +174,14 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 	if err := s.store.CreateAccount(account); err != nil {
 		return err
 	}
+
+	tokenString, err := createJWT(account)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("json token: ", tokenString)
+
 	return writeJSON(w, http.StatusOK, account)
 }
 
@@ -143,7 +221,7 @@ func (s *APIServer) Run(){
 	router := mux.NewRouter()
 
 	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
-	router.HandleFunc("/account/{id}", makeHTTPHandleFunc(s.handleGetAccountByID))
+	router.HandleFunc("/account/{id}", withJWTAuth( makeHTTPHandleFunc(s.handleGetAccountByID), s.store))
 	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
 
 	log.Println("Server is running on port", s.listenAdrr)

@@ -64,7 +64,7 @@ func(s *PostgresStore) CreateAccount(acc *Account) error {
 
 	query := `insert into account
 	(firstname,lastname,number,balance, created_at)
-	values ($1, $2, $3, $4, $5)`
+	values ($1, $2, $3, $4, $5);`
 
 	resp, err := s.db.Query(query, 
 				acc.FirstName,
