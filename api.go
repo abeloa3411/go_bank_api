@@ -135,6 +135,16 @@ func (s *APIServer) handleGetAccount(w http.ResponseWriter, r *http.Request) err
 	return writeJSON(w, http.StatusOK, accounts)
 }
 
+//login function
+func (s *APIServer) handleLogin(w http.ResponseWriter, r *http.Request) error{
+	var req LoginRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+	return writeJSON(w, http.StatusOK, req)
+}
+
 //get all account by id
 func (s *APIServer) handleGetAccountByID(w http.ResponseWriter, r *http.Request) error{
 	if r.Method == "GET" {
@@ -169,18 +179,15 @@ func (s *APIServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 		return err
 	}
 
-	account := NewAccount(createAcc.FirstName, createAcc.LastName)
+	account, err := NewAccount(createAcc.FirstName, createAcc.LastName, createAcc.Password)
 
-	if err := s.store.CreateAccount(account); err != nil {
-		return err
-	}
-
-	tokenString, err := createJWT(account)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("json token: ", tokenString)
+	if err := s.store.CreateAccount(account); err != nil {
+		return err
+	}
 
 	return writeJSON(w, http.StatusOK, account)
 }
@@ -216,19 +223,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) error{
 	return json.NewEncoder(w).Encode(v)
 }
 
-//run function
-func (s *APIServer) Run(){
-	router := mux.NewRouter()
-
-	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
-	router.HandleFunc("/account/{id}", withJWTAuth( makeHTTPHandleFunc(s.handleGetAccountByID), s.store))
-	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
-
-	log.Println("Server is running on port", s.listenAdrr)
-
-	http.ListenAndServe(s.listenAdrr, router)
-}
-
 //getId function
 
 func GetID (r *http.Request) (int, error){
@@ -242,4 +236,18 @@ func GetID (r *http.Request) (int, error){
 	}
 
 	return id, nil
+}
+
+//run function
+func (s *APIServer) Run(){
+	router := mux.NewRouter()
+
+	router.HandleFunc("/login", makeHTTPHandleFunc(s.handleLogin))
+	router.HandleFunc("/account", makeHTTPHandleFunc(s.handleAccount))
+	router.HandleFunc("/account/{id}", withJWTAuth( makeHTTPHandleFunc(s.handleGetAccountByID), s.store))
+	router.HandleFunc("/transfer", makeHTTPHandleFunc(s.handleTransfer))
+
+	log.Println("Server is running on port", s.listenAdrr)
+
+	http.ListenAndServe(s.listenAdrr, router)
 }
